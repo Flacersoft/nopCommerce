@@ -2,6 +2,7 @@
 using System.Linq;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Nop.Core;
@@ -15,6 +16,7 @@ using Nop.Services.Authentication;
 using Nop.Services.Authentication.External;
 using Nop.Services.Authentication.MultiFactor;
 using Nop.Services.Blogs;
+using Nop.Services.Caching;
 using Nop.Services.Catalog;
 using Nop.Services.Cms;
 using Nop.Services.Common;
@@ -93,10 +95,27 @@ namespace Nop.Web.Framework.Infrastructure
 
             //static cache manager
             var appSettings = Singleton<AppSettings>.Instance;
-            if (appSettings.Get<DistributedCacheConfig>().Enabled)
+            var distributedCacheConfig = appSettings.Get<DistributedCacheConfig>();
+            if (distributedCacheConfig.Enabled)
             {
-                services.AddScoped<ILocker, DistributedCacheManager>();
-                services.AddScoped<IStaticCacheManager, DistributedCacheManager>();
+                services.AddScoped(serviceProvider =>
+                {
+                    IStaticCacheManager manager = distributedCacheConfig.DistributedCacheType switch
+                    {
+                        DistributedCacheType.Redis => new RedisCacheManager(appSettings,
+                            serviceProvider.GetRequiredService<IDistributedCache>()),
+                        DistributedCacheType.SqlServer => new MsSqlServerCacheManager(appSettings,
+                            serviceProvider.GetRequiredService<IDistributedCache>()),
+                        DistributedCacheType.Memory => new MemoryDistributedCacheManager(appSettings,
+                            serviceProvider.GetRequiredService<IDistributedCache>()),
+                        _ => new MemoryDistributedCacheManager(appSettings,
+                            serviceProvider.GetRequiredService<IDistributedCache>())
+                    };
+
+                    return manager;
+                });
+
+                services.AddScoped(serviceProvider => serviceProvider.GetRequiredService<IStaticCacheManager>() as ILocker);
             }
             else
             {
